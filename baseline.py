@@ -1,18 +1,16 @@
+import pickle as pkl
+import random
+
 import numpy as np
 import torch
 import tqdm
-import random
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    pipeline,
-    BitsAndBytesConfig,
-)
 from datasets import load_dataset
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          BitsAndBytesConfig, pipeline)
+
 from data_modules import create_sciq_item
 
 SEED = 42
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_NAME = "microsoft/Phi-3-mini-4k-instruct"
 
 
@@ -29,7 +27,6 @@ def main():
     # Load pre-trained model
     model_kwargs = {
         "use_cache": False,
-        "device_map": "cuda",
         "trust_remote_code": True,
         "quantization_config": BitsAndBytesConfig(
             load_in_4bit=True,
@@ -37,13 +34,13 @@ def main():
             bnb_4bit_compute_dtype=torch.float16,
             bnb_4bit_use_double_quant=False,
         ),
+        "attn_implementation": "flash_attention_2",
+        "device_map": "auto",
     }
 
-    model = AutoModelForCausalLM.from_pretrained(
-        "microsoft/Phi-3-mini-4k-instruct", **model_kwargs
-    )
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, **model_kwargs)
 
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
     pipe = pipeline(
         "text-generation",
@@ -66,22 +63,26 @@ def main():
         {"role": "user", "content": x},
     ]
 
+    logs = {"Accuracy": 0, "FP": []}
     num_correct = 0
     num_total = 0
-    for i in tqdm.trange(len(format_dataset["validate"])):
-        output = pipe(
-            format_message(format_dataset["validate"][i]["inputs"]), **generation_args
-        )[0]["generated_text"]
+    for i in tqdm.trange(len(format_dataset["validation"])):
+        input = format_message(format_dataset["validation"][i]["inputs"])
+        target = format_dataset["validation"][i]["targets"].lower()
+        output = pipe(input, **generation_args)[0]["generated_text"]
         parsed_output = output[1].lower()
         if parsed_output not in ["a", "b", "c", "d"]:
-            print(
-                f"Index {i} : {output}\nTarget : {format_dataset['train'][i]['targets']}"
-            )
-        if format_dataset["train"][i]["targets"].lower() == parsed_output:
+            print(f"Index {i} : {output}\nTarget : {target}")
+        if target[0] == parsed_output:
             num_correct += 1
+        else:
+            logs["FP"].append((input, output))
         num_total += 1
 
     print(f"Accuracy : {num_correct/num_total*100:2.2f}")
+    logs["accuracy"] = num_correct / num_total * 100
+    with open("results/phi3_sciq.pkl", "wb") as f:
+        pkl.dump(logs, f)
     return 0
 
 
