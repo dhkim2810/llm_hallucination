@@ -1,28 +1,86 @@
-import pickle as pkl
+import argparse
+import os
 import random
+import pickle as pkl
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import tqdm
-from datasets import load_dataset
-from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig, pipeline)
+from data_modules import load_dataset
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+)
 
-from data_modules import create_sciq_item
+from utils import calc_accuracy
 
-SEED = 42
-MODEL_NAME = "microsoft/Phi-3-mini-4k-instruct"
+MODEL_DICT = {
+    "phi3": "microsoft/Phi-3-mini-4k-instruct",
+    "llama3": "meta-llama/Meta-Llama-3-8B-Instruct",
+}
 
 
-def main():
+def iterate(model, loader, tokenizer, optimizer=None, device="cuda", mode="train"):
+    if mode == "train":
+        model.train()
+    else:
+        model.eval()
+
+    model_outputs = {"target": [], "output": []}
+    total_loss = 0
+    total_samples = 0
+    for batch in tqdm.tqdm(loader):
+        batch = {
+            k: v.to(device) for k, v in batch.items()
+        }  # keys : inputs, attention_mask, labels
+        outputs = model(**batch)
+        loss = outputs.loss
+
+        if mode == "train":
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        logits = outputs.logits
+        preds = torch.argmax(logits, dim=-1)
+
+        assert preds.shape == batch["labels"].shape, f"Size mismatch between preds{preds.shape} and labels{batch["labels"].shape}."
+
+        tk_target = batch["input_ids"].detach().cpu() * torch.clip(batch["labels"], 0, 1).detach().cpu()
+        tk_pred = preds.detach().cpu() * torch.clip(batch["labels"], 0, 1).detach().cpu()
+
+        model_outputs["target"].extend(
+            tokenizer.batch_decode(tk_target, skip_special_tokens=True)
+        )
+        model_outputs["preds"].extend(
+            tokenizer.batch_decode(tk_pred, skip_special_tokens=True)
+        )
+
+        total_loss += loss.item()
+        total_samples += len(batch)
+
+    total_loss /= total_samples
+    return total_loss, model_outputs
+
+
+def main(args):
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_DICT[args.model_name])
+    tokenizer.pad_token = tokenizer.unk_token
+    tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
+    tokenizer.padding_side = "right"
+
     # Load dataset
-    dataset = load_dataset("allenai/sciq")
-    format_dataset = dataset.map(
-        create_sciq_item,
-        fn_kwargs={"hint": False},
-        batched=False,
-        num_proc=8,
+    val_dset = load_dataset(
+        args.dataset,
+        split="validation",
+        tokenizer=tokenizer,
+        max_seq_len=args.max_seq_len,
+        format=args.model_name,
+        use_hint=args.use_hint,
     )
+    val_loader = DataLoader(val_dset, batch_size=args.batch_size, shuffle=False)
 
     # Load pre-trained model
     model_kwargs = {
@@ -38,56 +96,63 @@ def main():
         "device_map": "auto",
     }
 
-    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    with torch.no_grad():
+        loss, outputs = iterate(model, val_loader, tokenizer, device="cuda", mode="val")
+        accuracy = calc_accuracy(outputs)
+    print(f"[Validation]\n- Loss: {loss}\n- Accuracy: {accuracy}")
 
-    pipe = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
+    # Save outputs
+    output_dir = f"{args.output_dir}/{args.model_name}_{args.dataset}"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+    with open(f"{output_dir}/baseline.pkl", "wb") as f:
+        pkl.dump({
+            "predictions": outputs,
+            "loss": loss,
+            "accuracy": accuracy,
+        }, f)
+
+
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--output_dir", type=str, default="outputs")
+
+    # Model arguments
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        choices=["phi3", "llama3"],
     )
 
-    generation_args = {
-        "max_new_tokens": 10,
-        "return_full_text": False,
-        "temperature": 0.0,
-        "do_sample": False,
-    }
+    # Dataset arguments
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        choices=["sciq", "scienceqa"],
+    )
+    parser.add_argument("--max_seq_len", type=int, default=512)
+    parser.add_argument("--soft_prompt_length", type=int, default=64)
 
-    format_message = lambda x: [
-        {
-            "role": "system",
-            "content": "Answer correctly to following question. Try your best to reduce hallucination.",
-        },
-        {"role": "user", "content": x},
-    ]
+    # Training/Validation arguments
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--num_epochs", type=int, default=50)
 
-    logs = {"Accuracy": 0, "FP": []}
-    num_correct = 0
-    num_total = 0
-    for i in tqdm.trange(len(format_dataset["validation"])):
-        input = format_message(format_dataset["validation"][i]["inputs"])
-        target = format_dataset["validation"][i]["targets"].lower()
-        output = pipe(input, **generation_args)[0]["generated_text"]
-        parsed_output = output[1].lower()
-        if parsed_output not in ["a", "b", "c", "d"]:
-            print(f"Index {i} : {output}\nTarget : {target}")
-        if target[0] == parsed_output:
-            num_correct += 1
-        else:
-            logs["FP"].append((input, output))
-        num_total += 1
+    # Inferencing arguments
+    parser.add_argument("--use_hint", action="store_true")
 
-    print(f"Accuracy : {num_correct/num_total*100:2.2f}")
-    logs["accuracy"] = num_correct / num_total * 100
-    with open("results/phi3_sciq.pkl", "wb") as f:
-        pkl.dump(logs, f)
-    return 0
+    args = parser.parse_args(args)
+    return args
 
 
 if __name__ == "__main__":
-    random.seed(SEED)
-    torch.random.manual_seed(SEED)
-    np.random.seed(SEED)
-    main()
+    args = parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.random.manual_seed(args.seed)
+    main(args)
