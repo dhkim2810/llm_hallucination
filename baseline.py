@@ -1,19 +1,15 @@
 import argparse
 import os
-import random
 import pickle as pkl
+import random
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 import tqdm
-from data_modules import load_dataset
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-)
+from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from data_modules import load_dataset
 from utils import calc_accuracy
 
 MODEL_DICT = {
@@ -46,10 +42,17 @@ def iterate(model, loader, tokenizer, optimizer=None, device="cuda", mode="train
         logits = outputs.logits
         preds = torch.argmax(logits, dim=-1)
 
-        assert preds.shape == batch["labels"].shape, f"Size mismatch between preds{preds.shape} and labels{batch["labels"].shape}."
+        assert (
+            preds.shape == batch["labels"].shape
+        ), f'Size mismatch between preds{preds.shape} and labels{batch["labels"].shape}.'
 
-        tk_target = batch["input_ids"].detach().cpu() * torch.clip(batch["labels"], 0, 1).detach().cpu()
-        tk_pred = preds.detach().cpu() * torch.clip(batch["labels"], 0, 1).detach().cpu()
+        tk_target = (
+            batch["input_ids"].detach().cpu()
+            * torch.clip(batch["labels"], 0, 1).detach().cpu()
+        )
+        tk_pred = (
+            preds.detach().cpu() * torch.clip(batch["labels"], 0, 1).detach().cpu()
+        )
 
         model_outputs["target"].extend(
             tokenizer.batch_decode(tk_target, skip_special_tokens=True)
@@ -110,12 +113,14 @@ def main(args):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     with open(f"{output_dir}/baseline.pkl", "wb") as f:
-        pkl.dump({
-            "predictions": outputs,
-            "loss": loss,
-            "accuracy": accuracy,
-        }, f)
-
+        pkl.dump(
+            {
+                "predictions": outputs,
+                "loss": loss,
+                "accuracy": accuracy,
+            },
+            f,
+        )
 
 
 def parse_args(args=None):
