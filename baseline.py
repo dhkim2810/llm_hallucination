@@ -93,7 +93,7 @@ def main(args):
             bnb_4bit_use_double_quant=False,
         ),
         "attn_implementation": "flash_attention_2",
-        "device_map": "auto",
+        "device_map": args.device,
     }
 
     model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
@@ -105,6 +105,8 @@ def main(args):
 
     # Save outputs
     output_dir = f"{args.output_dir}/{args.model_name}_{args.dataset}"
+    if args.use_hint:
+        output_dir += "_hint"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     with open(f"{output_dir}/baseline.pkl", "wb") as f:
