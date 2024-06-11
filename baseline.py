@@ -7,8 +7,7 @@ import numpy as np
 import torch
 import tqdm
 from torch.utils.data import DataLoader
-from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig)
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from data_modules import load_dataset
 from utils import calc_accuracy
@@ -25,7 +24,7 @@ def iterate(model, loader, tokenizer, optimizer=None, device="cuda", mode="train
     else:
         model.eval()
 
-    model_outputs = {"target": [], "output": []}
+    model_outputs = {"target": [], "preds": []}
     total_loss = 0
     total_samples = 0
     for batch in tqdm.tqdm(loader):
