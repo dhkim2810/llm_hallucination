@@ -56,6 +56,7 @@ class SciQDataset(Dataset):
         ], f"Invalid split provided : {split}."
         self.split = split
         self.tokenizer = tokenizer
+        self.padding_side = "right" if "llama3" in format else "left"
         self.formatter = Formatter(format=format)
         self.max_seq_len = max_seq_len
 
@@ -122,12 +123,20 @@ class SciQDataset(Dataset):
         for key in tk_question:
             tk_question[key] = torch.nn.functional.pad(
                 tk_question[key],
-                (0, self.max_seq_len - tk_question[key].size(1)),
+                (
+                    (0, self.max_seq_len - tk_question[key].size(1))
+                    if self.padding_side == "right"
+                    else (self.max_seq_len - tk_question[key].size(1), 0)
+                ),
                 value=self.tokenizer.pad_token_id,
             )
         label = torch.nn.functional.pad(
             label,
-            (0, self.max_seq_len - label.size(1)),
+            (
+                (0, self.max_seq_len - label.size(1))
+                if self.padding_side == "right"
+                else (self.max_seq_len - label.size(1), 0)
+            ),
             value=-100,
         )
 

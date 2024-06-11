@@ -6,6 +6,7 @@ import random
 import numpy as np
 import torch
 import tqdm
+from accelerate import infer_auto_device_map
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -72,7 +73,6 @@ def main(args):
     tokenizer = AutoTokenizer.from_pretrained(MODEL_DICT[args.model_name])
     tokenizer.pad_token = tokenizer.unk_token
     tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
-    tokenizer.padding_side = "right"
 
     # Load dataset
     val_dset = load_dataset(
