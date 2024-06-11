@@ -7,7 +7,8 @@ import numpy as np
 import torch
 import tqdm
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          BitsAndBytesConfig)
 
 from data_modules import load_dataset
 from utils import calc_accuracy
@@ -87,7 +88,8 @@ def main(args):
 
     # Load pre-trained model
     model_kwargs = {
-        "use_cache": False,
+        "token": os.environ["HF_TOKEN"],
+        "use_cache": True,
         "trust_remote_code": True,
         "quantization_config": BitsAndBytesConfig(
             load_in_4bit=True,
@@ -99,7 +101,9 @@ def main(args):
         "device_map": args.device,
     }
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_DICT[args.model_name], **model_kwargs
+    )
 
     with torch.no_grad():
         loss, outputs = iterate(model, val_loader, tokenizer, device="cuda", mode="val")
