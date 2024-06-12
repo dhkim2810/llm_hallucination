@@ -38,11 +38,12 @@ def main(args):
     # Load dataset
     val_dset = load_dataset(
         args.dataset,
-        split="generation",
+        split="validation",
         tokenizer=tokenizer,
         format=args.model_name,
         max_length=args.max_length,
         use_hint=args.use_hint,
+        is_generation=True,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
     val_loader = DataLoader(val_dset, batch_size=args.batch_size, shuffle=False)
