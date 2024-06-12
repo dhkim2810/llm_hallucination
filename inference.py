@@ -19,54 +19,21 @@ MODEL_DICT = {
 }
 
 
-def iterate(model, loader, tokenizer, optimizer=None, device="cuda", mode="train"):
-    if mode == "train":
-        model.train()
-    else:
-        model.eval()
-
-    model_outputs = {"target": [], "preds": []}
-    total_loss = 0
-    total_samples = 0
+def generate(model, loader, tokenizer, device="cuda"):
+    model_outputs = {"targets": [], "preds": []}
     for batch in tqdm.tqdm(loader):
         batch = {
             k: v.to(device) for k, v in batch.items()
         }  # keys : inputs, attention_mask, labels
-        outputs = model(**batch)
-        loss = outputs.loss
 
-        if mode == "train":
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        logits = outputs.logits
-        preds = torch.argmax(logits, dim=-1)
-
-        assert (
-            preds.shape == batch["labels"].shape
-        ), f'Size mismatch between preds{preds.shape} and labels{batch["labels"].shape}.'
-
-        tk_target = (
-            batch["input_ids"].detach().cpu()
-            * torch.clip(batch["labels"], 0, 1).detach().cpu()
-        )
-        tk_pred = (
-            preds.detach().cpu() * torch.clip(batch["labels"], 0, 1).detach().cpu()
-        )
-
-        model_outputs["target"].extend(
-            tokenizer.batch_decode(tk_target, skip_special_tokens=True)
+        output = model.generate(**batch)
+        model_outputs["targets"].extend(
+            tokenizer.batch_decode(output, skip_special_tokens=True)
         )
         model_outputs["preds"].extend(
-            tokenizer.batch_decode(tk_pred, skip_special_tokens=True)
+            tokenizer.batch_decode(output, skip_special_tokens=True)
         )
-
-        total_loss += loss.item()
-        total_samples += len(batch)
-
-    total_loss /= total_samples
-    return total_loss, model_outputs
+    return model_outputs
 
 
 def main(args):
@@ -105,7 +72,7 @@ def main(args):
     )
 
     with torch.no_grad():
-        loss, outputs = iterate(model, val_loader, tokenizer, device="cuda", mode="val")
+        loss, outputs = generate(model, val_loader, tokenizer, device="cuda")
         accuracy = calc_accuracy(outputs)
     print(f"[Validation]\n- Loss: {loss}\n- Accuracy: {accuracy}")
 
