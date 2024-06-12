@@ -55,11 +55,11 @@ class FineTuneDataset(Dataset):
         is_label=True,  # question with answers
         padding_side="right",
     ):
-        self.split = "validation" if split == "gen" else split
+        self.split = "validation" if split == "generation" else split
         self.tokenizer = tokenizer
         self.formatter = Formatter(format=format)
         self.max_length = max_length
-        self.is_generation = split == "gen"
+        self.is_generation = split == "generation"
         self.use_hint = use_hint
         self.padding_side = padding_side  # "right" if "llama3" in format else "left"
         self.is_label = is_label
