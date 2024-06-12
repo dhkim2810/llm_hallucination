@@ -88,7 +88,7 @@ def main(args):
     train_dset = load_dataset(
         args.dataset,
         split="train",
-        max_seq_len=args.max_seq_len,
+        max_length=args.max_length,
         format=args.model_name,
         use_hint=args.use_hint,
         is_label=False,
@@ -97,7 +97,7 @@ def main(args):
     val_dset = load_dataset(
         args.dataset,
         split="validation",
-        max_seq_len=args.max_seq_len,
+        max_length=args.max_length,
         format=args.model_name,
         use_hint=args.use_hint,
         is_label=False,
@@ -243,10 +243,9 @@ if __name__ == "__main__":
     args.device = PartialState().process_index
 
     # Set output directory
-    args.output_dir = (
-        f"{args.output_dir}/{args.model_name}_{args.dataset}_ft_{args.tune}"
-    )
+    args.output_dir = f"{args.output_dir}/{args.model_name}_{args.dataset}"
     if args.use_hint:
         args.output_dir += "_hint"
+    args.output_dir += f"/{args.tune}"
 
     main(args)

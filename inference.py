@@ -43,6 +43,7 @@ def main(args):
         format=args.model_name,
         max_length=args.max_length,
         use_hint=args.use_hint,
+        padding_side="left" if args.model_name == "phi3" else "right",
     )
     val_loader = DataLoader(val_dset, batch_size=args.batch_size, shuffle=False)
 
