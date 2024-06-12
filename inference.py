@@ -27,8 +27,11 @@ MODEL_DICT = {
 def generate(model, loader, tokenizer, device="cuda"):
     model_outputs = {"targets": [], "preds": []}
     for batch in tqdm.tqdm(loader):
-        inputs = batch["inputs"].to(device)
-        output = model.generate(inputs)
+        inputs = {
+            "input_ids": batch["input_ids"].to(device),
+            "attention_mask": batch["attention_mask"].to(device),
+        }
+        output = model.generate(**inputs)
         model_outputs["targets"].extend(batch["answer"])
         model_outputs["preds"].extend(
             tokenizer.batch_decode(output, skip_special_tokens=True)
