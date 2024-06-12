@@ -160,7 +160,7 @@ class SciQDataset(FineTuneDataset):
                 max_length=self.max_length,
             )["input_ids"]
             tk_item = self._pad(tk_item)
-            return {"inputs": tk_item.squeeze(), "answer": answer}
+            return {"inputs": tk_item, "answer": answer}
         else:
             item = self.formatter(question=question, answer=answer)
             return self._tokenize_item(question, answer)
@@ -226,7 +226,7 @@ class ScienceQADataset:
                 max_length=self.max_length,
             )["input_ids"]
             tk_item = self._pad(tk_item)
-            return {"inputs": tk_item.squeeze(), "answer": answer}
+            return {"inputs": tk_item, "answer": answer}
         else:
             item = self.formatter(question=question, answer=answer)
             return self._tokenize_item(question, answer)
