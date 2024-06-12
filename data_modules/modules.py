@@ -1,8 +1,9 @@
 import random
 
 import torch
-from datasets import load_dataset
-from torch.utils.data import Dataset
+from datasets import Dataset, load_dataset
+
+# from torch.utils.data import Dataset
 
 
 class Formatter:
@@ -46,21 +47,22 @@ class Formatter:
 class FineTuneDataset(Dataset):
     def __init__(
         self,
-        tokenizer,
+        tokenizer=None,
         split="train",
         format="phi3",
         max_length=256,
-        use_system_prompt=True,
         use_hint=False,
+        is_label=True,  # question with answers
+        padding_side="right",
     ):
         self.split = "validation" if split == "gen" else split
         self.tokenizer = tokenizer
-        self.formatter = Formatter(format=format, system_prompt=use_system_prompt)
+        self.formatter = Formatter(format=format)
         self.max_length = max_length
         self.is_generation = split == "gen"
-        self.use_system_prompt = use_system_prompt
         self.use_hint = use_hint
-        self.padding_side = "right" if "llama3" in format else "left"
+        self.padding_side = padding_side  # "right" if "llama3" in format else "left"
+        self.is_label = is_label
 
     def __len__(self) -> int:
         pass
@@ -86,20 +88,24 @@ class FineTuneDataset(Dataset):
             truncation=True,
             max_length=self.max_length,
         )
+        for key in tk_question:
+            tk_question[key] = self._pad(tk_question[key])
+
+        if not self.is_label:
+            return {
+                "input_ids": tk_question["input_ids"].squeeze(),
+                "attention_mask": tk_question["attention_mask"].squeeze(),
+            }
+
         tk_answer = self.tokenizer(
             answer,
             return_tensors="pt",
             truncation=True,
             max_length=self.max_length,
         )
-
         tk_answer = tk_answer["input_ids"][:, 1:]  # truncate statr_of_text token
         label = torch.ones_like(tk_question["input_ids"]) * -100
         label[:, -tk_answer.size(1) :] = tk_answer
-
-        # append padding to max_seq_len
-        for key in tk_question:
-            tk_question[key] = self._pad(tk_question[key])
         label = self._pad(label)
 
         return {
@@ -129,6 +135,15 @@ class SciQDataset(FineTuneDataset):
 
     def __getitem__(self, idx):
         return self.dataset[idx]
+
+    def reset(self):
+        self.dataset = self.dataset.map(
+            self._create_sciq_item,
+            fn_kwargs={"hint": self.use_hint},
+            batched=False,
+            remove_columns=self.dataset.column_names,
+            load_from_cache_file=False,
+        )
 
     def _create_sciq_item(self, example, hint=False) -> dict[str, torch.Tensor | int]:
         # parse item
