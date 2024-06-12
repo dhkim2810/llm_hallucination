@@ -56,7 +56,7 @@ class FineTuneDataset(Dataset):
         is_generation=False,  # question tokens without answer
         padding_side="right",
     ):
-        self.split = split
+        self._split = split
         self.tokenizer = tokenizer
         self.formatter = Formatter(format=format)
         self.max_length = max_length
@@ -122,7 +122,7 @@ class SciQDataset(FineTuneDataset):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.dataset = load_dataset("allenai/sciq", split=self.split)
+        self.dataset = load_dataset("allenai/sciq", split=self._split)
         self.dataset = self.dataset.map(
             self._create_sciq_item,
             fn_kwargs={"hint": self.use_hint},
@@ -193,7 +193,7 @@ class ScienceQADataset:
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.dataset = load_dataset("allenai/sciq", split=self.split)
+        self.dataset = load_dataset("allenai/sciq", split=self._split)
         self.dataset = self.dataset.filter(lambda x: x["image"] == None)
         self.dataset = self.dataset.map(
             self._create_scienceqa_item,
