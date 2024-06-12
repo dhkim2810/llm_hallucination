@@ -75,9 +75,9 @@ class FineTuneDataset(Dataset):
         return torch.nn.functional.pad(
             tk_item,
             (
-                (0, self.max_seq_len - tk_item.size(1))
+                (0, self.max_length - tk_item.size(1))
                 if self.padding_side == "right"
-                else (self.max_seq_len - tk_item.size(1), 0)
+                else (self.max_length - tk_item.size(1), 0)
             ),
             value=self.tokenizer.pad_token_id,
         )
