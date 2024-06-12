@@ -17,6 +17,7 @@ from transformers import (
     AutoTokenizer,
     BitsAndBytesConfig,
     TrainingArguments,
+    default_data_collator,
 )
 from trl import SFTTrainer
 from trl.trainer import ConstantLengthDataset
@@ -103,7 +104,6 @@ def main(args):
         is_label=False,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
-    # train_dset = ConstantLengthDataset(train_dset, args.max_seq_len)
 
     # Load pre-trained model
     model_kwargs = {

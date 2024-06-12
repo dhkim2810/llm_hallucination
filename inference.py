@@ -8,7 +8,12 @@ import torch
 import tqdm
 from accelerate import infer_auto_device_map
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    default_data_collator,
+)
 
 from data_modules import load_dataset
 from utils import calc_accuracy
@@ -46,7 +51,12 @@ def main(args):
         is_generation=True,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
-    val_loader = DataLoader(val_dset, batch_size=args.batch_size, shuffle=False)
+    val_loader = DataLoader(
+        val_dset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=default_data_collator,
+    )
 
     # Load pre-trained model
     model_kwargs = {
