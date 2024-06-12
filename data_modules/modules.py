@@ -82,7 +82,9 @@ class FineTuneDataset(Dataset):
             value=self.tokenizer.pad_token_id,
         )
 
-    def _tokenize_item(self, question, answer) -> dict[str, torch.Tensor | int]:
+    def _tokenize_item(
+        self, question, answer
+    ) -> tuple[dict[str, torch.Tensor | int], str]:
         tk_question = self.tokenizer(
             question,
             return_tensors="pt",
@@ -113,6 +115,7 @@ class FineTuneDataset(Dataset):
             "input_ids": tk_question["input_ids"].squeeze(),
             "attention_mask": tk_question["attention_mask"].squeeze(),
             "labels": label.squeeze(),
+            "answer": answer,
         }
 
 
@@ -134,8 +137,8 @@ class SciQDataset(FineTuneDataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, idx):
-        return self.dataset[idx]
+    def __getitem__(self, idx) -> dict[str, torch.Tensor | int | str]:
+        return self.dataset[idx], self.dataset[idx]["answer"]
 
     def reset(self):
         self.dataset = self.dataset.map(
@@ -146,7 +149,9 @@ class SciQDataset(FineTuneDataset):
             load_from_cache_file=False,
         )
 
-    def _create_sciq_item(self, example, hint=False) -> dict[str, torch.Tensor | int]:
+    def _create_sciq_item(
+        self, example, hint=False
+    ) -> dict[str, torch.Tensor | int | str]:
         # parse item
         question, question_with_answer, answer = self._parse_row(example, hint)
 
@@ -160,8 +165,7 @@ class SciQDataset(FineTuneDataset):
                 max_length=self.max_length,
                 padding="max_length",
             )
-            tk_item["answer"] = answer
-            return tk_item
+            return {"item": tk_item, "answer": answer}
         else:
             item = self.formatter(question=question, answer=answer)
             return self._tokenize_item(question, answer)
@@ -209,11 +213,11 @@ class ScienceQADataset:
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        return self.dataset[idx], self.dataset[idx]["answer"]
 
     def _create_scienceqa_item(
         self, example, hint=False
-    ) -> dict[str, torch.Tensor | int]:
+    ) -> dict[str, torch.Tensor | int | str]:
         # parse item
         question, question_with_answer, answer = self._parse_row(example, hint)
 
@@ -227,8 +231,7 @@ class ScienceQADataset:
                 max_length=self.max_length,
                 padding="max_length",
             )
-            tk_item["answer"] = answer
-            return tk_item
+            return {"item": tk_item, "answer": answer}
         else:
             item = self.formatter(question=question, answer=answer)
             return self._tokenize_item(question, answer)
