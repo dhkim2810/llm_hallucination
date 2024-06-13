@@ -8,12 +8,8 @@ import torch
 import tqdm
 from accelerate import infer_auto_device_map
 from torch.utils.data import DataLoader
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    default_data_collator,
-)
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          BitsAndBytesConfig, default_data_collator)
 
 from data_modules import load_dataset
 from utils import calc_accuracy
@@ -50,7 +46,9 @@ def generate(model, loader, tokenizer, device="cuda"):
 
 
 def main(args):
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_DICT[args.model_name])
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL_DICT[args.model_name] if args.model_path is None else args.model_path
+    )
     tokenizer.pad_token = tokenizer.unk_token
     tokenizer.pad_token_id = tokenizer.unk_token_id
 
@@ -61,7 +59,7 @@ def main(args):
         tokenizer=tokenizer,
         format=args.model_name,
         max_length=args.max_length,
-        use_hint=args.use_hint,
+        use_hint=args.tune == "hint",
         is_generation=True,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
@@ -88,7 +86,8 @@ def main(args):
     }
 
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_DICT[args.model_name], **model_kwargs
+        MODEL_DICT[args.model_name] if args.model_path is None else args.model_path,
+        **model_kwargs,
     )
 
     with torch.no_grad():
@@ -96,11 +95,6 @@ def main(args):
         # accuracy = calc_accuracy(outputs)
 
     # Save outputs
-    output_dir = f"{args.output_dir}/{args.model_name}_{args.dataset}"
-    if args.use_hint:
-        output_dir += "_hint"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
     with open(f"{output_dir}/generation.pkl", "wb") as f:
         pkl.dump(outputs, f)
 
@@ -110,13 +104,13 @@ def parse_args(args=None):
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--output_dir", type=str, default="outputs")
+    parser.add_argument(
+        "--tune", type=str, default=None, choices=["weight", "prompt", "hint"]
+    )
 
     # Model arguments
-    parser.add_argument(
-        "--model_name",
-        type=str,
-        choices=["phi3", "llama3"],
-    )
+    parser.add_argument("--model_name", type=str, default="phi3")
+    parser.add_argument("--model_path", type=str, default=None)
 
     # Dataset arguments
     parser.add_argument(
@@ -124,11 +118,10 @@ def parse_args(args=None):
         type=str,
         choices=["sciq", "scienceqa"],
     )
-    parser.add_argument("--max_length", type=int, default=256)
+    parser.add_argument("--max_length", type=int, default=512)
 
     # Inferencing arguments
     parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--use_hint", action="store_true")
 
     args = parser.parse_args(args)
     return args
@@ -139,4 +132,15 @@ if __name__ == "__main__":
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.random.manual_seed(args.seed)
+
+    output_dir = (
+        f"{args.output_dir}/{args.model_name}_{args.dataset}"
+        if args.model_path is None
+        else args.model_path
+    )
+    if args.tune is not None:
+        output_dir += f"/{args.tune}"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
     main(args)

@@ -5,20 +5,11 @@ import random
 import numpy as np
 import torch
 from accelerate import PartialState
-from peft import (
-    LoraConfig,
-    PromptTuningConfig,
-    PromptTuningInit,
-    TaskType,
-    get_peft_model,
-)
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    TrainingArguments,
-    default_data_collator,
-)
+from peft import (LoraConfig, PromptTuningConfig, PromptTuningInit, TaskType,
+                  get_peft_model)
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          BitsAndBytesConfig, TrainingArguments,
+                          default_data_collator)
 from trl import SFTTrainer
 
 from data_modules import load_dataset
@@ -72,9 +63,9 @@ PEFT_DICT = {
 
 
 def main(args):
-
     tokenizer = AutoTokenizer.from_pretrained(MODEL_DICT[args.model_name])
     tokenizer.pad_token = tokenizer.unk_token
+    tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
 
     # Load dataset
     train_dset = load_dataset(
@@ -83,7 +74,7 @@ def main(args):
         tokenizer=tokenizer,
         format=args.model_name,
         max_length=args.max_length,
-        use_hint=args.use_hint,
+        use_hint=args.tune == "hint",
         padding_side="left" if args.model_name == "phi3" else "right",
     )
     val_dset = load_dataset(
@@ -92,7 +83,7 @@ def main(args):
         tokenizer=tokenizer,
         format=args.model_name,
         max_length=args.max_length,
-        use_hint=args.use_hint,
+        use_hint=args.tune == "hint",
         padding_side="left" if args.model_name == "phi3" else "right",
     )
 
@@ -130,7 +121,7 @@ def main(args):
 
     training_config = {
         "bf16": True,
-        "do_eval": False,
+        "do_eval": True,
         "learning_rate": 5.0e-06,
         "log_level": "info",
         "logging_steps": 1,
@@ -143,9 +134,9 @@ def main(args):
         "per_device_eval_batch_size": args.batch_size,
         "per_device_train_batch_size": args.batch_size,
         "remove_unused_columns": True,
-        "save_steps": 1000,
+        "save_steps": 100,
         "save_total_limit": 1,
-        "seed": 0,
+        "seed": args.seed,
         "gradient_checkpointing": True,
         "gradient_checkpointing_kwargs": {"use_reentrant": False},
         "gradient_accumulation_steps": 1,
@@ -191,7 +182,7 @@ def parse_args(args=None):
 
     # Fine-tuning methods
     parser.add_argument(
-        "--tune", type=str, default="weight", choices=["weight", "prompt"]
+        "--tune", type=str, default="weight", choices=["weight", "prompt", "hint"]
     )
 
     # Model arguments
@@ -215,9 +206,6 @@ def parse_args(args=None):
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=5)
 
-    # Inferencing arguments
-    parser.add_argument("--use_hint", action="store_true")
-
     args = parser.parse_args(args)
     return args
 
@@ -235,8 +223,6 @@ if __name__ == "__main__":
 
     # Set output directory
     args.output_dir = f"{args.output_dir}/{args.model_name}_{args.dataset}"
-    if args.use_hint:
-        args.output_dir += "_hint"
     args.output_dir += f"/{args.tune}"
 
     main(args)
