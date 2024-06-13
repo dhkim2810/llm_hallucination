@@ -20,7 +20,6 @@ from transformers import (
     default_data_collator,
 )
 from trl import SFTTrainer
-from trl.trainer import ConstantLengthDataset
 
 from data_modules import load_dataset
 
@@ -43,15 +42,7 @@ PEFT_FT_DICT = {
     ),
     "llama3": LoraConfig(
         r=8,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
+        target_modules="all-linear",
         task_type=TaskType.CAUSAL_LM,
     ),
 }
@@ -89,19 +80,19 @@ def main(args):
     train_dset = load_dataset(
         args.dataset,
         split="train",
-        max_length=args.max_length,
+        tokenizer=tokenizer,
         format=args.model_name,
+        max_length=args.max_length,
         use_hint=args.use_hint,
-        is_label=False,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
     val_dset = load_dataset(
         args.dataset,
         split="validation",
-        max_length=args.max_length,
+        tokenizer=tokenizer,
         format=args.model_name,
+        max_length=args.max_length,
         use_hint=args.use_hint,
-        is_label=False,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
 
@@ -149,10 +140,10 @@ def main(args):
         "max_steps": -1,
         "output_dir": args.output_dir,
         "overwrite_output_dir": True,
-        "per_device_eval_batch_size": 4,
-        "per_device_train_batch_size": 4,
+        "per_device_eval_batch_size": args.batch_size,
+        "per_device_train_batch_size": args.batch_size,
         "remove_unused_columns": True,
-        "save_steps": 10,
+        "save_steps": 1000,
         "save_total_limit": 1,
         "seed": 0,
         "gradient_checkpointing": True,

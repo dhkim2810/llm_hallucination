@@ -1,7 +1,10 @@
 import random
 
 import torch
-from datasets import Dataset, load_dataset
+
+# from datasets import Dataset, load_dataset
+from datasets import load_dataset
+from torch.utils.data import Dataset
 
 # from torch.utils.data import Dataset
 
@@ -22,7 +25,7 @@ class Formatter:
     def __call__(self, **kwargs) -> dict[str, str]:
         return self.format_fn(**kwargs)
 
-    def _format_phi3(self, question, answer, is_generate=False):
+    def _format_phi3(self, question, answer, is_generate=False) -> dict[str, str]:
         input = ""
         if self.system_prompt:
             input += f"<|user|> {self.system_prompt} {question}<|end|><|assistant|>"
@@ -33,7 +36,7 @@ class Formatter:
             input += label
         return {"input": input, "label": label, "answer": answer}
 
-    def _format_llama3(self, question, answer, is_generate=False):
+    def _format_llama3(self, question, answer, is_generate=False) -> dict[str, str]:
         input = ""
         if self.system_prompt:
             input += f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>]\n\n{self.system_prompt}<|eot_id|>"
@@ -51,19 +54,19 @@ class FineTuneDataset(Dataset):
         split="train",
         format="phi3",
         max_length=256,
+        padding_side="right",
         use_hint=False,
         is_label=True,  # question with answers
         is_generation=False,  # question tokens without answer
-        padding_side="right",
     ):
         self._split = split
         self.tokenizer = tokenizer
         self.formatter = Formatter(format=format)
-        self.max_length = max_length
-        self.is_generation = is_generation
-        self.use_hint = use_hint
         self.padding_side = padding_side  # "right" if "llama3" in format else "left"
+        self.max_length = max_length
+        self.use_hint = use_hint
         self.is_label = is_label
+        self.is_generation = is_generation
 
     def __len__(self) -> int:
         pass
@@ -83,39 +86,50 @@ class FineTuneDataset(Dataset):
         )
 
     def _tokenize_item(
-        self, question, answer
+        self, item: dict[str, str]
     ) -> tuple[dict[str, torch.Tensor | int], str]:
-        tk_question = self.tokenizer(
-            question,
+        input = item["input"]
+        label = item["label"]
+        answer = item["answer"]
+
+        tk_input = self.tokenizer(
+            input,
             return_tensors="pt",
             truncation=True,
             max_length=self.max_length,
         )
-        for key in tk_question:
-            tk_question[key] = self._pad(tk_question[key])
+        # if not self.is_label:
+        #     for key in tk_input:
+        #         tk_input[key] = self._pad(tk_input[key])
 
-        if not self.is_label:
-            return {
-                "input_ids": tk_question["input_ids"].squeeze(),
-                "attention_mask": tk_question["attention_mask"].squeeze(),
-            }
-
-        tk_answer = self.tokenizer(
-            answer,
+        #     return {
+        #         "input_ids": tk_input["input_ids"].squeeze(),
+        #         "attention_mask": tk_input["attention_mask"].squeeze(),
+        #         "answer": ord(answer),
+        # }
+        tk_label = self.tokenizer(
+            label,
             return_tensors="pt",
             truncation=True,
             max_length=self.max_length,
+        )["input_ids"][:, 1:]
+
+        tk_input["input_ids"] = torch.cat([tk_input["input_ids"], tk_label], dim=-1)
+        tk_input["attention_mask"] = torch.cat(
+            [tk_input["attention_mask"], torch.ones_like(tk_label)], dim=-1
         )
-        tk_answer = tk_answer["input_ids"][:, 1:]  # truncate statr_of_text token
-        label = torch.ones_like(tk_question["input_ids"]) * -100
-        label[:, -tk_answer.size(1) :] = tk_answer
+        for key in tk_input:
+            tk_input[key] = self._pad(tk_input[key])
+
+        label = torch.ones_like(tk_input["input_ids"]) * -100
+        label[:, -tk_label.size(1) :] = tk_label
         label = self._pad(label)
 
         return {
-            "input_ids": tk_question["input_ids"].squeeze(),
-            "attention_mask": tk_question["attention_mask"].squeeze(),
+            "input_ids": tk_input["input_ids"].squeeze(),
+            "attention_mask": tk_input["attention_mask"].squeeze(),
             "labels": label.squeeze(),
-            "answer": answer,
+            "answer": ord(answer),
         }
 
 
@@ -138,7 +152,7 @@ class SciQDataset(FineTuneDataset):
         return len(self.dataset)
 
     def __getitem__(self, idx) -> dict[str, torch.Tensor | int | str]:
-        return self.dataset[idx], self.dataset[idx]["answer"]
+        return self.dataset[idx]
 
     def reset(self):
         self.dataset = self.dataset.map(
@@ -153,22 +167,14 @@ class SciQDataset(FineTuneDataset):
         self, example, hint=False
     ) -> dict[str, torch.Tensor | int | str]:
         # parse item
-        question, question_with_answer, answer = self._parse_row(example, hint)
+        question, answer = self._parse_row(example, hint)
 
         # create message
         if self.is_generation:
             item = self.formatter(question=question, answer=answer, is_generate=True)
-            tk_item = self.tokenizer(
-                item["input"],
-                return_tensors="pt",
-                truncation=True,
-                max_length=self.max_length,
-                padding="max_length",
-            )
-            return {"item": tk_item, "answer": answer}
         else:
             item = self.formatter(question=question, answer=answer)
-            return self._tokenize_item(question, answer)
+        return self._tokenize_item(item)
 
     def _parse_row(self, row, hint=False) -> tuple[str, str]:
         question = f'The following are multiple choice questions about science.\n**Question** {row["question"]}'
@@ -187,19 +193,18 @@ class SciQDataset(FineTuneDataset):
             [f"({answer_indexs[i]}) {choice}" for i, choice in enumerate(choices)]
         )
         question += f"\n**Choices** \n{choices}\n**Answer:** ("
-        question_with_answer = question + answer_indexs[answer_idx] + ")"
         answer = answer_indexs[answer_idx]
 
-        return question, question_with_answer, answer
+        return question, answer
 
 
-class ScienceQADataset:
+class ScienceQADataset(FineTuneDataset):
     def __init__(
         self,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.dataset = load_dataset("allenai/sciq", split=self._split)
+        self.dataset = load_dataset("derek-thomas/ScienceQA", split=self._split)
         self.dataset = self.dataset.filter(lambda x: x["image"] == None)
         self.dataset = self.dataset.map(
             self._create_scienceqa_item,
@@ -213,28 +218,20 @@ class ScienceQADataset:
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        return self.dataset[idx], self.dataset[idx]["answer"]
+        return self.dataset[idx]
 
     def _create_scienceqa_item(
         self, example, hint=False
     ) -> dict[str, torch.Tensor | int | str]:
         # parse item
-        question, question_with_answer, answer = self._parse_row(example, hint)
+        question, answer = self._parse_row(example, hint)
 
         # create message
         if self.is_generation:
             item = self.formatter(question=question, answer=answer, is_generate=True)
-            tk_item = self.tokenizer(
-                item["input"],
-                return_tensors="pt",
-                truncation=True,
-                max_length=self.max_length,
-                padding="max_length",
-            )
-            return {"item": tk_item, "answer": answer}
         else:
             item = self.formatter(question=question, answer=answer)
-            return self._tokenize_item(question, answer)
+        return self._tokenize_item(item)
 
     def _parse_row(self, row, hint=False) -> tuple[str, str]:
         context = self.get_context_text(row, use_caption=False)
@@ -247,12 +244,10 @@ class ScienceQADataset:
             if hint
             else f"Question: {question}\nOptions: {choice}\n"
         )
-        answer = f"Answer: The answer is ("  # {answer}."
-        question = input + answer
+        question = input + "Answer: The answer is ("  # {answer}."
         question = question.replace("  ", " ").strip()
-        question_with_answer = question + f"{answer})"
 
-        return question, question_with_answer, answer
+        return question, answer
 
     def get_question_text(self, problem):
         question = problem["question"]

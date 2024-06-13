@@ -25,16 +25,26 @@ MODEL_DICT = {
 
 
 def generate(model, loader, tokenizer, device="cuda"):
-    model_outputs = {"targets": [], "preds": []}
+    model_outputs = {"answers": [], "labels": [], "preds": []}
     for batch in tqdm.tqdm(loader):
+        batch_size = len(batch["answer"])
         inputs = {
             "input_ids": batch["input_ids"].to(device),
             "attention_mask": batch["attention_mask"].to(device),
         }
-        output = model.generate(**inputs)
-        model_outputs["targets"].extend(batch["answer"])
+        output = model.generate(**inputs, max_new_tokens=2).detach().cpu()
+        residual = output.size(-1) - batch["labels"].size(-1)
+        mask = torch.cat(
+            [(batch["labels"] != -100), torch.ones(batch_size, residual)], dim=-1
+        ).long()
+        model_outputs["answers"].extend(batch["answer"])
+        model_outputs["labels"].extend(
+            tokenizer.batch_decode(
+                torch.clip(batch["labels"], 0), skip_special_tokens=True
+            )
+        )
         model_outputs["preds"].extend(
-            tokenizer.batch_decode(output, skip_special_tokens=True)
+            tokenizer.batch_decode(output * mask, skip_special_tokens=True)
         )
     return model_outputs
 
@@ -42,11 +52,12 @@ def generate(model, loader, tokenizer, device="cuda"):
 def main(args):
     tokenizer = AutoTokenizer.from_pretrained(MODEL_DICT[args.model_name])
     tokenizer.pad_token = tokenizer.unk_token
+    tokenizer.pad_token_id = tokenizer.unk_token_id
 
     # Load dataset
     val_dset = load_dataset(
         args.dataset,
-        split="validation",
+        split="test",
         tokenizer=tokenizer,
         format=args.model_name,
         max_length=args.max_length,
@@ -82,8 +93,7 @@ def main(args):
 
     with torch.no_grad():
         outputs = generate(model, val_loader, tokenizer, device="cuda")
-        accuracy = calc_accuracy(outputs)
-    print(f"[Validation] Accuracy: {accuracy}")
+        # accuracy = calc_accuracy(outputs)
 
     # Save outputs
     output_dir = f"{args.output_dir}/{args.model_name}_{args.dataset}"
@@ -92,13 +102,7 @@ def main(args):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     with open(f"{output_dir}/generation.pkl", "wb") as f:
-        pkl.dump(
-            {
-                "predictions": outputs,
-                "accuracy": accuracy,
-            },
-            f,
-        )
+        pkl.dump(outputs, f)
 
 
 def parse_args(args=None):
