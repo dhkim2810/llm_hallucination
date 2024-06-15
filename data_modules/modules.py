@@ -260,9 +260,11 @@ class ScienceQADataset(FineTuneDataset):
 
         # create message
         if self.is_generation:
-            item = self.formatter(question=question, answer=answer, is_generate=True)
+            item = self.formatter(
+                question=question, answer=answer, solution=solution, is_generate=True
+            )
         else:
-            item = self.formatter(question=question, answer=answer)
+            item = self.formatter(question=question, answer=answer, solution=solution)
         return self._tokenize_item(item)
 
     def _parse_row(self, row, hint=False) -> tuple[str, str, str]:
