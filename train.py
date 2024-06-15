@@ -79,18 +79,20 @@ def main(args):
     # Load dataset
     train_dset = load_dataset(
         args.dataset,
-        split="train",
         tokenizer=tokenizer,
-        format=args.model_name,
+        split="train",
+        model=args.model_name,
+        prompt_format=args.prompt_format,
         max_length=args.max_length,
         use_hint=args.tune == "hint",
         padding_side="left" if args.model_name == "phi3" else "right",
     )
     val_dset = load_dataset(
         args.dataset,
-        split="validation",
         tokenizer=tokenizer,
-        format=args.model_name,
+        split="validation",
+        model=args.model_name,
+        prompt_format=args.prompt_format,
         max_length=args.max_length,
         use_hint=args.tune == "hint",
         padding_side="left" if args.model_name == "phi3" else "right",
@@ -204,12 +206,18 @@ def parse_args(args=None):
         choices=["sciq", "scienceqa"],
     )
     parser.add_argument("--max_length", type=int, default=128)
-    parser.add_argument("--soft_prompt_length", type=int, default=64)
+    parser.add_argument(
+        "--prompt_format",
+        type=str,
+        default="QHC-A",
+        choices=["QC-A", "QC-AS", "QHC-A", "QHC-AS"],
+    )
 
     # Training/Validation arguments
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=5)
+    parser.add_argument("--soft_prompt_length", type=int, default=64)
 
     args = parser.parse_args(args)
     return args

@@ -131,18 +131,18 @@ def main(args):
         raise ValueError("Invalid model name")
 
     # Load dataset
-    val_dset = load_dataset(
+    test_dset = load_dataset(
         args.dataset,
-        split="test",
         tokenizer=tokenizer,
-        format=args.model_name,
+        split="test",
+        model=args.model_name,
+        prompt_format=args.prompt_format,
         max_length=args.max_length,
         use_hint=args.tune == "hint",
-        is_generation=True,
         padding_side="left" if args.model_name == "phi3" else "right",
     )
-    val_loader = DataLoader(
-        val_dset,
+    test_loader = DataLoader(
+        test_dset,
         batch_size=args.batch_size,
         shuffle=False,
         collate_fn=default_data_collator,
@@ -180,7 +180,7 @@ def main(args):
         )
 
     with torch.no_grad():
-        outputs = generate(model, val_loader, tokenizer, device="cuda")
+        outputs = generate(model, test_loader, tokenizer, device="cuda")
         # accuracy = calc_accuracy(outputs)
 
     # Calculate BLEU and ROUGE scores
@@ -219,7 +219,7 @@ def parse_args(args=None):
         type=str,
         choices=["sciq", "scienceqa"],
     )
-    parser.add_argument("--max_length", type=int, default=512)
+    parser.add_argument("--max_length", type=int, default=128)
 
     # Inferencing arguments
     parser.add_argument("--batch_size", type=int, default=8)
