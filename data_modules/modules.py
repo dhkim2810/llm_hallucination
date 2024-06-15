@@ -1,7 +1,6 @@
 import random
 
 import torch
-
 # from datasets import Dataset, load_dataset
 from datasets import load_dataset
 from torch.utils.data import Dataset
@@ -118,11 +117,11 @@ class FineTuneDataset(Dataset):
         tk_input["attention_mask"] = torch.cat(
             [tk_input["attention_mask"], torch.ones_like(tk_label)], dim=-1
         )
-        for key in tk_input:
-            tk_input[key] = self._pad(tk_input[key])
-
         label = torch.ones_like(tk_input["input_ids"]) * -100
         label[:, -tk_label.size(1) :] = tk_label
+
+        for key in tk_input:
+            tk_input[key] = self._pad(tk_input[key])
         label = self._pad(label)
 
         return {

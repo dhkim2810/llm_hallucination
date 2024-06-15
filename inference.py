@@ -7,6 +7,8 @@ import numpy as np
 import torch
 import tqdm
 from accelerate import infer_auto_device_map
+from peft import (LoraConfig, PeftConfig, PeftModel, PromptTuningConfig,
+                  PromptTuningInit, TaskType, get_peft_model)
 from torch.utils.data import DataLoader
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           BitsAndBytesConfig, default_data_collator)
@@ -17,6 +19,46 @@ from utils import calc_accuracy
 MODEL_DICT = {
     "phi3": "microsoft/Phi-3-mini-4k-instruct",
     "llama3": "meta-llama/Meta-Llama-3-8B-Instruct",
+}
+
+PEFT_FT_DICT = {
+    "phi3": LoraConfig(
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.05,
+        bias="none",
+        target_modules="all-linear",
+        modules_to_save=None,
+        task_type=TaskType.CAUSAL_LM,
+    ),
+    "llama3": LoraConfig(
+        r=8,
+        target_modules="all-linear",
+        task_type=TaskType.CAUSAL_LM,
+    ),
+}
+
+## Phi3 Prompt-tuning(Soft Prompt)
+PEFT_PT_DICT = {
+    "phi3": PromptTuningConfig(
+        task_type=TaskType.CAUSAL_LM,
+        prompt_tuning_init=PromptTuningInit.TEXT,
+        num_virtual_tokens=64,
+        tokenizer_name_or_path=MODEL_DICT["phi3"],
+        prompt_tuning_init_text="You are the smartest student in class. Try your best answer correctly to questions.",
+    ),
+    "llama3": PromptTuningConfig(
+        task_type=TaskType.CAUSAL_LM,
+        prompt_tuning_init=PromptTuningInit.TEXT,
+        num_virtual_tokens=64,
+        tokenizer_name_or_path=MODEL_DICT["llama3"],
+        prompt_tuning_init_text="You are the smartest student in class. Try your best answer correctly to questions.",
+    ),
+}
+
+PEFT_DICT = {
+    "weight": PEFT_FT_DICT,
+    "prompt": PEFT_PT_DICT,
 }
 
 
@@ -85,17 +127,30 @@ def main(args):
         "device_map": args.device,
     }
 
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_DICT[args.model_name] if args.model_path is None else args.model_path,
-        **model_kwargs,
-    )
+    if args.model_path is None or args.tune == "prompt":
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_DICT[args.model_name],
+            **model_kwargs,
+        )
+        if args.tune == "prompt":
+            peft_config = PeftConfig.from_pretrained(args.model_path)
+            model = PeftModel.from_pretrained(model, args.model_path)
+            model.load_adapter(args.model_path, adapter_name="default")
+            model.set_adapter("default")
+    elif args.model_path is not None and args.tune != "prompt":
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_path,
+            **model_kwargs,
+        )
 
     with torch.no_grad():
         outputs = generate(model, val_loader, tokenizer, device="cuda")
         # accuracy = calc_accuracy(outputs)
 
     # Save outputs
-    with open(f"{output_dir}/generation.pkl", "wb") as f:
+    with open(
+        f"gen_results/{args.model_name}_{args.dataset}_{args.tune}.pkl", "wb"
+    ) as f:
         pkl.dump(outputs, f)
 
 
@@ -105,7 +160,10 @@ def parse_args(args=None):
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--output_dir", type=str, default="outputs")
     parser.add_argument(
-        "--tune", type=str, default=None, choices=["weight", "prompt", "hint"]
+        "--tune",
+        type=str,
+        default="baseline",
+        choices=["baseline", "weight", "prompt", "hint"],
     )
 
     # Model arguments
@@ -138,7 +196,7 @@ if __name__ == "__main__":
         if args.model_path is None
         else args.model_path
     )
-    if args.tune is not None:
+    if args.tune is not None and args.model_path is None:
         output_dir += f"/{args.tune}"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)

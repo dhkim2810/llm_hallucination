@@ -146,10 +146,11 @@ def main(args):
 
     peft_params = PEFT_DICT[args.tune][args.model_name]
 
+    peft_model = get_peft_model(model, peft_params)
+
     trainer = SFTTrainer(
         args=sft_config,
-        peft_config=peft_params,
-        model=model,
+        model=peft_model,
         # tokenizer=tokenizer,
         train_dataset=train_dset,
         eval_dataset=val_dset,
@@ -171,7 +172,17 @@ def main(args):
     trainer.save_metrics("eval", metrics)
 
     # Save the trained model
-    trainer.save_model(sft_config.output_dir)
+    try:
+        print(f"Saving model to {sft_config.output_dir}")
+        peft_model.save_pretrained(sft_config.output_dir)
+        tokenizer.save_pretrained(sft_config.output_dir)
+        print("Model saved successfully.")
+    except Exception as e:
+        print(f"Error saving model: {e}")
+    # trainer.save_model(sft_config.output_dir)
+
+    # state = accelerator.get_state_dict(model_to_save) # This will call the unwrap model as well
+    # accelerator.save(state, model_save_path)
 
 
 def parse_args(args=None):
