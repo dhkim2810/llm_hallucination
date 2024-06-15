@@ -6,15 +6,26 @@ import random
 import numpy as np
 import torch
 import tqdm
-from accelerate import infer_auto_device_map
-from peft import (LoraConfig, PeftConfig, PeftModel, PromptTuningConfig,
-                  PromptTuningInit, TaskType, get_peft_model)
+from peft import (
+    LoraConfig,
+    PeftConfig,
+    PeftModel,
+    PromptTuningConfig,
+    PromptTuningInit,
+    TaskType,
+)
 from torch.utils.data import DataLoader
-from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig, default_data_collator)
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    default_data_collator,
+)
 
 from data_modules import load_dataset
 from utils import calc_accuracy
+from nltk.translate.bleu_score import corpus_bleu
+from rouge_score import rouge_scorer, scoring
 
 MODEL_DICT = {
     "phi3": "microsoft/Phi-3-mini-4k-instruct",
@@ -62,6 +73,25 @@ PEFT_DICT = {
 }
 
 
+def calculate_bleu(preds, refs):
+    references = [[ref.split()] for ref in refs]
+    candidates = [pred.split() for pred in preds]
+    score = corpus_bleu(references, candidates)
+    return score
+
+
+def calculate_rouge(preds, refs):
+    scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
+    aggregator = scoring.BootstrapAggregator()
+
+    for ref, pred in zip(refs, preds):
+        scores = scorer.score(ref, pred)
+        aggregator.add_scores(scores)
+
+    result = aggregator.aggregate()
+    return result
+
+
 def generate(model, loader, tokenizer, device="cuda"):
     model_outputs = {"answers": [], "labels": [], "preds": []}
     for batch in tqdm.tqdm(loader):
@@ -91,8 +121,14 @@ def main(args):
     tokenizer = AutoTokenizer.from_pretrained(
         MODEL_DICT[args.model_name] if args.model_path is None else args.model_path
     )
-    tokenizer.pad_token = tokenizer.unk_token
-    tokenizer.pad_token_id = tokenizer.unk_token_id
+    if args.model_name == "phi3":
+        tokenizer.pad_token = tokenizer.unk_token
+        tokenizer.pad_token_id = tokenizer.unk_token_id
+    elif args.model_name == "llama3":
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    else:
+        raise ValueError("Invalid model name")
 
     # Load dataset
     val_dset = load_dataset(
@@ -147,6 +183,13 @@ def main(args):
         outputs = generate(model, val_loader, tokenizer, device="cuda")
         # accuracy = calc_accuracy(outputs)
 
+    # Calculate BLEU and ROUGE scores
+    bleu_score = calculate_bleu(outputs["preds"], outputs["labels"])
+    rouge_scores = calculate_rouge(outputs["preds"], outputs["labels"])
+
+    print(f"BLEU Score: {bleu_score:.4f}")
+    print(f"ROUGE Scores: {rouge_scores}")
+
     # Save outputs
     with open(
         f"gen_results/{args.model_name}_{args.dataset}_{args.tune}.pkl", "wb"
@@ -191,14 +234,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     torch.random.manual_seed(args.seed)
 
-    output_dir = (
-        f"{args.output_dir}/{args.model_name}_{args.dataset}"
-        if args.model_path is None
-        else args.model_path
-    )
-    if args.tune is not None and args.model_path is None:
-        output_dir += f"/{args.tune}"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir, exist_ok=True)
 
     main(args)

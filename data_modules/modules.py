@@ -1,6 +1,7 @@
 import random
 
 import torch
+
 # from datasets import Dataset, load_dataset
 from datasets import load_dataset
 from torch.utils.data import Dataset
@@ -9,9 +10,9 @@ from torch.utils.data import Dataset
 
 
 class Formatter:
-    def __init__(self, format="phi3", system_prompt=None):
-        self.format = format
-        self.format_fn = getattr(self, f"_format_{format}")
+    def __init__(self, model="phi3", system_prompt=None):
+        self.model = model
+        self.format_fn = getattr(self, f"_format_{model}")
         self.system_prompt = (
             system_prompt
             if system_prompt
@@ -24,23 +25,33 @@ class Formatter:
     def __call__(self, **kwargs) -> dict[str, str]:
         return self.format_fn(**kwargs)
 
-    def _format_phi3(self, question, answer, is_generate=False) -> dict[str, str]:
+    def _format_phi3(
+        self, question, answer, solution=None, is_generate=False
+    ) -> dict[str, str]:
         input = ""
         if self.system_prompt:
             input += f"<|user|> {self.system_prompt} {question}<|end|><|assistant|>"
         else:
             input += f"<|user|> {question}<|end|><|assistant|>"
-        label = f"{answer})<|end|>"
+        if solution:
+            label = f"{answer}) Solution : {solution}<|end|>"
+        else:
+            label = f"{answer})<|end|>"
         if not is_generate:
             input += label
         return {"input": input, "label": label, "answer": answer}
 
-    def _format_llama3(self, question, answer, is_generate=False) -> dict[str, str]:
+    def _format_llama3(
+        self, question, answer, solution=None, is_generate=False
+    ) -> dict[str, str]:
         input = ""
         if self.system_prompt:
             input += f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>]\n\n{self.system_prompt}<|eot_id|>"
         input += f"<|start_header_id|>user<|end_header_id|>\n\n{question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-        label = f"{answer})<|eot_id|>"
+        if solution:
+            label = f"{answer}) Solution : {solution}<|eot_id|>"
+        else:
+            label = f"{answer})<|eot_id|>"
         if not is_generate:
             input += label
         return {"input": input, "label": label, "answer": answer}
@@ -51,7 +62,8 @@ class FineTuneDataset(Dataset):
         self,
         tokenizer=None,
         split="train",
-        format="phi3",
+        model="phi3",
+        prompt_format="QHC-A",
         max_length=256,
         padding_side="right",
         use_hint=False,
@@ -60,18 +72,25 @@ class FineTuneDataset(Dataset):
     ):
         self._split = split
         self.tokenizer = tokenizer
-        self.formatter = Formatter(format=format)
+        self.model = model
+        self.formatter = Formatter(model=model)
+        self.prompt_format = prompt_format
         self.padding_side = padding_side  # "right" if "llama3" in format else "left"
         self.max_length = max_length
         self.use_hint = use_hint
         self.is_label = is_label
         self.is_generation = is_generation
 
-    def __len__(self) -> int:
+    def __len__(self):
         pass
 
     def __getitem__(self, idx):
         pass
+
+    def _parse_prompt_format(self):
+        q_format, a_format = self.prompt_format.split("-")
+
+        return q_format, a_format
 
     def _pad(self, tk_item: torch.Tensor) -> torch.Tensor:
         return torch.nn.functional.pad(
@@ -86,7 +105,7 @@ class FineTuneDataset(Dataset):
 
     def _tokenize_item(
         self, item: dict[str, str]
-    ) -> tuple[dict[str, torch.Tensor | int], str]:
+    ) -> dict[str, torch.Tensor | int | str]:
         input = item["input"]
         label = item["label"]
         answer = item["answer"]
@@ -138,6 +157,13 @@ class SciQDataset(FineTuneDataset):
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        q_format, a_format = self._parse_prompt_format()
+        if "H" in q_format:
+            self.use_hint = True
+        if "S" in a_format:
+            return NotImplementedError("SciQ dataset does not support solution format")
+
         self.dataset = load_dataset("allenai/sciq", split=self._split)
         self.dataset = self.dataset.map(
             self._create_sciq_item,
@@ -203,6 +229,13 @@ class ScienceQADataset(FineTuneDataset):
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        q_format, a_format = self._parse_prompt_format()
+        if "H" in q_format:
+            self.use_hint = True
+        if "S" in a_format:
+            self.use_solution = True
+
         self.dataset = load_dataset("derek-thomas/ScienceQA", split=self._split)
         self.dataset = self.dataset.filter(lambda x: x["image"] == None)
         self.dataset = self.dataset.map(
@@ -223,7 +256,7 @@ class ScienceQADataset(FineTuneDataset):
         self, example, hint=False
     ) -> dict[str, torch.Tensor | int | str]:
         # parse item
-        question, answer = self._parse_row(example, hint)
+        question, answer, solution = self._parse_row(example, hint)
 
         # create message
         if self.is_generation:
@@ -232,11 +265,12 @@ class ScienceQADataset(FineTuneDataset):
             item = self.formatter(question=question, answer=answer)
         return self._tokenize_item(item)
 
-    def _parse_row(self, row, hint=False) -> tuple[str, str]:
+    def _parse_row(self, row, hint=False) -> tuple[str, str, str]:
         context = self.get_context_text(row, use_caption=False)
         question = self.get_question_text(row)
         choice = self.get_choice_text(row)
-        answer = self.get_answer(row)
+        answer = self.get_answer_text(row)
+        solution = self.get_solution_text(row)
 
         input = (
             f"Context: {context}\nQuestion: {question}\nOptions: {choice}\n"
@@ -246,7 +280,7 @@ class ScienceQADataset(FineTuneDataset):
         question = input + "Answer: The answer is ("  # {answer}."
         question = question.replace("  ", " ").strip()
 
-        return question, answer
+        return question, answer, solution
 
     def get_question_text(self, problem):
         question = problem["question"]
@@ -268,5 +302,11 @@ class ScienceQADataset(FineTuneDataset):
         choice_txt = " ".join(choice_list)
         return choice_txt
 
-    def get_answer(self, problem, options=["A", "B", "C", "D", "E"]):
+    def get_answer_text(self, problem, options=["A", "B", "C", "D", "E"]):
         return options[problem["answer"]]
+
+    def get_solution_text(self, problem):
+        # \\n: GPT-3 can generate the solution with more tokens
+        solution = problem["solution"].replace("\n", "\\n")
+
+        return solution

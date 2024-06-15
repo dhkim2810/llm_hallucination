@@ -5,11 +5,20 @@ import random
 import numpy as np
 import torch
 from accelerate import PartialState
-from peft import (LoraConfig, PromptTuningConfig, PromptTuningInit, TaskType,
-                  get_peft_model)
-from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig, TrainingArguments,
-                          default_data_collator)
+from peft import (
+    LoraConfig,
+    PromptTuningConfig,
+    PromptTuningInit,
+    TaskType,
+    get_peft_model,
+)
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    TrainingArguments,
+    default_data_collator,
+)
 from trl import SFTTrainer
 
 from data_modules import load_dataset
@@ -106,19 +115,6 @@ def main(args):
         MODEL_DICT[args.model_name], **model_kwargs
     )
 
-    # sft_config = TrainingArguments(
-    #     per_device_train_batch_size=args.batch_size,
-    #     gradient_accumulation_steps=4,
-    #     warmup_steps=2,
-    #     num_train_epochs=args.num_epochs,
-    #     learning_rate=args.lr,
-    #     fp16=True,
-    #     logging_steps=1,
-    #     output_dir=args.output_dir,
-    #     optim="paged_adamw_8bit",
-    #     use_tqdm=True,
-    # )
-
     training_config = {
         "bf16": True,
         "do_eval": True,
@@ -151,12 +147,10 @@ def main(args):
     trainer = SFTTrainer(
         args=sft_config,
         model=peft_model,
-        # tokenizer=tokenizer,
         train_dataset=train_dset,
         eval_dataset=val_dset,
         max_seq_length=args.max_length,
         dataset_text_field="input_ids",
-        # dataset_label_field="labels",
         packing=True,
     )
 
@@ -209,7 +203,7 @@ def parse_args(args=None):
         type=str,
         choices=["sciq", "scienceqa"],
     )
-    parser.add_argument("--max_length", type=int, default=512)
+    parser.add_argument("--max_length", type=int, default=128)
     parser.add_argument("--soft_prompt_length", type=int, default=64)
 
     # Training/Validation arguments
